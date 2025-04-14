@@ -3,6 +3,7 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+import puppeteer from 'puppeteer';
 
 // Get token from environment variables
 const token = process.env.TG_TOKEN;
@@ -66,32 +67,68 @@ function isValidAddress(text) {
  * Look up token information by contract address
  */
 async function lookupToken(chatId, address) {
-  try {
-    bot.sendMessage(chatId, `🔍 Looking up information for contract: ${address}`);
-    const response = await axios.get(`https://api-legacy.bubblemaps.io/map-data?token=${address}&chain=bsc`);
-
-    const tokenData = response.data;
-    const tokenInfo = {
-      name: tokenData.full_name,
-      symbol: tokenData.symbol,
-    };
-    
-    const message = `
-*Token Information*
-📝 *Name:* ${tokenInfo.name}
-🔤 *Symbol:* ${tokenInfo.symbol}
-🔗 *Contract:* [${address}](https://etherscan.io/address/${address})
-`;
-    
-    bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown',
-      disable_web_page_preview: true
-    });
-  } catch (error) {
-    console.error('Error looking up token:', error);
-    bot.sendMessage(chatId, "❌ Sorry, I couldn't retrieve information for that token. Please try again later.");
+    try {
+      bot.sendMessage(chatId, `🔍 Looking up information for contract: ${address}`);
+      const response = await axios.get(`https://api-legacy.bubblemaps.io/map-data?token=${address}&chain=bsc`);
+  
+      const screenshot = await generateBubbleMapScreenshot(address);
+      
+      const tokenData = response.data;
+      const message = `
+  *Token Information*
+  📝 *Name:* ${tokenData.full_name}
+  🔤 *Symbol:* ${tokenData.symbol}
+  🔗 *Contract:* [${address}](https://etherscan.io/address/${address})
+  `;
+      
+      // Send text information
+      bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true
+      });
+      
+      // Send screenshot as a separate photo message
+      if (screenshot) {
+        bot.sendPhoto(chatId, screenshot);
+      }
+    } catch (error) {
+      console.error('Error looking up token:', error);
+      bot.sendMessage(chatId, "❌ Sorry, I couldn't retrieve information for that token. Please try again later.");
+    }
   }
-}
+
+async function generateBubbleMapScreenshot(tokenAddress) {
+    const browser = await puppeteer.launch({
+      executablePath: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-shields']
+    });
+
+    console.log('Browser launched', browser);
+    
+    const page = await browser.newPage();
+
+    console.log('New page created', page);
+    await page.setViewport({width: 1200, height: 800, deviceScaleFactor: 2});
+    
+    try {
+      await page.goto(`https://app.bubblemaps.io/bsc/token/${tokenAddress}?small_text&hide_context`, {
+        waitUntil: 'networkidle2',
+        timeout: 60000
+      });
+      
+      // Use setTimeout as an alternative to waitForTimeout
+      await new Promise(resolve => setTimeout(resolve, 8000));
+      
+      return await page.screenshot({
+        type: 'jpeg',
+        quality: 90,
+        fullPage: false
+      });
+    } finally {
+      await browser.close();
+    }
+  }
 
 /**
  * Format token supply with proper decimal places
