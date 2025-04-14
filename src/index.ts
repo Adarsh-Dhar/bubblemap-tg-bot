@@ -72,13 +72,15 @@ async function lookupToken(chatId, address) {
       const response = await axios.get(`https://api-legacy.bubblemaps.io/map-data?token=${address}&chain=bsc`);
   
       const screenshot = await generateBubbleMapScreenshot(address);
-      
+      const legacyResponse = await axios.get(`https://api-legacy.bubblemaps.io/map-metadata?chain=bsc&token=${address}`);
+      const tokenMetadata = legacyResponse.data;
       const tokenData = response.data;
       const message = `
   *Token Information*
   📝 *Name:* ${tokenData.full_name}
   🔤 *Symbol:* ${tokenData.symbol}
   🔗 *Contract:* [${address}](https://etherscan.io/address/${address})
+  🔤 *Decentralisation Score:* ${tokenMetadata.decentralisation_score}
   `;
       
       // Send text information
