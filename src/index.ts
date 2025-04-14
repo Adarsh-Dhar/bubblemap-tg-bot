@@ -68,27 +68,18 @@ function isValidAddress(text) {
 async function lookupToken(chatId, address) {
   try {
     bot.sendMessage(chatId, `🔍 Looking up information for contract: ${address}`);
-    
-    // Example API call - replace with your actual token data source
-    // const response = await axios.get(`https://api.example.com/token/${address}`);
-    
-    // Placeholder for demonstration purposes
-    // In a real implementation, you would process the API response
+    const response = await axios.get(`https://api-legacy.bubblemaps.io/map-data?token=${address}&chain=bsc`);
+
+    const tokenData = response.data;
     const tokenInfo = {
-      name: "Example Token",
-      symbol: "EXT",
-      decimals: 18,
-      totalSupply: "1000000000000000000000000",
-      holders: 1250
+      name: tokenData.full_name,
+      symbol: tokenData.symbol,
     };
     
     const message = `
 *Token Information*
 📝 *Name:* ${tokenInfo.name}
 🔤 *Symbol:* ${tokenInfo.symbol}
-🔢 *Decimals:* ${tokenInfo.decimals}
-💰 *Total Supply:* ${formatSupply(tokenInfo.totalSupply, tokenInfo.decimals)}
-👥 *Holders:* ${tokenInfo.holders}
 🔗 *Contract:* [${address}](https://etherscan.io/address/${address})
 `;
     
