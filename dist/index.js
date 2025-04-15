@@ -14,193 +14,282 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
-const canvas_1 = require("canvas");
-const node_telegram_bot_api_1 = __importDefault(require("node-telegram-bot-api"));
-const axios_1 = __importDefault(require("axios"));
-// Load environment variables
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
+const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios');
+const puppeteer_1 = __importDefault(require("puppeteer"));
+// Get token from environment variables
 const token = process.env.TG_TOKEN;
-const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY;
-// Initialize bot
-const bot = new node_telegram_bot_api_1.default(token, { polling: true });
-// Caching setup (simple in-memory cache for example)
-const cache = new Map();
-// Constants
-const CHAIN = 'bsc'; // Change to appropriate chain
-const CANVAS_SIZE = { width: 800, height: 600 };
+const bot = new TelegramBot(token, { polling: true });
+// Valid chains
+const VALID_CHAINS = ['eth', 'bsc', 'polygon', 'arbitrum', 'optimism', 'avalanche'];
 // Start/Help Command
 bot.onText(/\/start|\/help/, (msg) => {
     const chatId = msg.chat.id;
-    const message = `
-🤖 *Welcome to TokenInfoBot!*
+    const message = `🤖 **Welcome to TokenInfoBot!**
 
 I can help you analyze cryptocurrency tokens with:
 - Bubble Map Visualization
 - Market Data
 - Decentralization Scores
 
-*Commands:*
-- /lookup [contract address] - Get detailed token analysis
+**Commands:**
+- /lookup <chain> <address> - Get detailed token analysis
+- /screenshot <chain> <address> - Get bubblemap visualization
+- /miniapp - Open interactive web application
 - /help - Show this help message
 
-Just paste a contract address to get started!
-`;
+**Supported chains:** eth, bsc, polygon, arbitrum, optimism, avalanche`;
     bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
 });
-// Address handlers
-bot.onText(/\/lookup (.+)/, handleAddressInput);
-bot.on('message', handleAddressInput);
-function handleAddressInput(msg, match) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const chatId = msg.chat.id;
-        const input = match ? match[1] : msg.text;
-        if (!input || input.startsWith('/') || !isValidAddress(input)) {
-            if (!match)
-                return; // Only respond to valid addresses
-            return bot.sendMessage(chatId, "❌ Invalid contract address format");
+// Lookup Command (comprehensive info + screenshot)
+bot.onText(/\/lookup (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
+    const chatId = msg.chat.id;
+    const params = match[1].trim().split(' ');
+    if (params.length < 2) {
+        return bot.sendMessage(chatId, "❌ Please specify both chain and contract address.\nExample: `/lookup bsc 0x...`");
+    }
+    const chain = params[0].toLowerCase();
+    const contractAddress = params[1];
+    if (!VALID_CHAINS.includes(chain)) {
+        return bot.sendMessage(chatId, `❌ Invalid chain. Supported chains: ${VALID_CHAINS.join(', ')}`);
+    }
+    if (isValidAddress(contractAddress)) {
+        yield lookupToken(chatId, chain, contractAddress);
+    }
+    else {
+        bot.sendMessage(chatId, "❌ Invalid contract address format");
+    }
+}));
+// Screenshot Command
+bot.onText(/\/screenshot (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
+    const chatId = msg.chat.id;
+    const params = match[1].trim().split(' ');
+    if (params.length < 2) {
+        return bot.sendMessage(chatId, "❌ Please specify both chain and contract address.\nExample: `/screenshot bsc 0x...`");
+    }
+    const chain = params[0].toLowerCase();
+    const contractAddress = params[1];
+    if (!VALID_CHAINS.includes(chain)) {
+        return bot.sendMessage(chatId, `❌ Invalid chain. Supported chains: ${VALID_CHAINS.join(', ')}`);
+    }
+    if (isValidAddress(contractAddress)) {
+        yield sendTokenScreenshot(chatId, chain, contractAddress);
+    }
+    else {
+        bot.sendMessage(chatId, "❌ Invalid contract address format");
+    }
+}));
+// Mini App Command
+bot.onText(/\/miniapp(.*)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const params = match[1] ? match[1].trim().split(' ') : [];
+    if (params.length >= 2) {
+        const chain = params[0].toLowerCase();
+        const address = params[1];
+        if (VALID_CHAINS.includes(chain) && isValidAddress(address)) {
+            // Launch with specific chain and address
+            bot.sendMessage(chatId, `📊 Open Interactive Bubblemap for ${chain.toUpperCase()} token ${address}`, {
+                reply_markup: {
+                    inline_keyboard: [[
+                            {
+                                text: "Launch Bubblemap App",
+                                web_app: { url: `https://bubblemap-tg-bot-1j79.vercel.app/${chain}/${address}` },
+                            }
+                        ]]
+                }
+            });
         }
-        yield processTokenRequest(chatId, input.trim());
+        else {
+            promptForChainAndAddress(chatId, "miniapp");
+        }
+    }
+    else {
+        promptForChainAndAddress(chatId, "miniapp");
+    }
+});
+/**
+ * Prompt user to provide chain and address for miniapp
+ */
+function promptForChainAndAddress(chatId, command) {
+    const message = `Please provide a blockchain and contract address:
+  
+Example: /${command} eth 0x...
+
+Supported chains: ${VALID_CHAINS.join(', ')}`;
+    bot.sendMessage(chatId, message);
+}
+// Direct Message Handler for contract addresses
+bot.on('message', (msg) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!msg.text || msg.text.startsWith('/'))
+        return;
+    const chatId = msg.chat.id;
+    const parts = msg.text.trim().split(' ');
+    // If exactly two parts and first is a valid chain, handle as chain + address combo
+    if (parts.length === 2 && VALID_CHAINS.includes(parts[0].toLowerCase())) {
+        const chain = parts[0].toLowerCase();
+        const possibleAddress = parts[1];
+        if (isValidAddress(possibleAddress)) {
+            yield lookupToken(chatId, chain, possibleAddress);
+        }
+        else {
+            bot.sendMessage(chatId, "❌ Invalid contract address format");
+        }
+    }
+    // If it's a single word that looks like an address, ask for chain
+    else if (parts.length === 1 && isValidAddress(parts[0])) {
+        const address = parts[0];
+        yield promptForChain(chatId, address);
+    }
+}));
+/**
+ * Prompt user to select a chain for the provided address
+ */
+function promptForChain(chatId, address) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const keyboard = VALID_CHAINS.map(chain => [{
+                text: chain.toUpperCase(),
+                callback_data: `chain_${chain}_${address}`
+            }]);
+        bot.sendMessage(chatId, `Please select a blockchain for address ${address}:`, {
+            reply_markup: {
+                inline_keyboard: keyboard
+            }
+        });
     });
 }
-// Validation
+// Handle chain selection callback
+bot.on('callback_query', (callbackQuery) => __awaiter(void 0, void 0, void 0, function* () {
+    const data = callbackQuery.data;
+    const chatId = callbackQuery.message.chat.id;
+    if (data.startsWith('chain_')) {
+        const parts = data.split('_');
+        const chain = parts[1];
+        const address = parts[2];
+        if (VALID_CHAINS.includes(chain) && isValidAddress(address)) {
+            bot.answerCallbackQuery(callbackQuery.id);
+            yield lookupToken(chatId, chain, address);
+        }
+    }
+}));
+/**
+ * Check if text appears to be a valid contract address
+ */
 function isValidAddress(text) {
     return /^0x[a-fA-F0-9]{40}$/.test(text);
 }
-// Main processing flow
-function processTokenRequest(chatId, address) {
+/**
+ * Look up token information by contract address
+ */
+function lookupToken(chatId, chain, address) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const processingMsg = yield bot.sendMessage(chatId, '🔍 Analyzing token...');
-            // Parallel data fetching
-            const [bubbleData, marketData, scoreData] = yield Promise.all([
-                getBubbleMapData(address),
-                getMarketData(address),
-                getDecentralizationScore(address)
-            ]);
-            // Generate visualization
-            const bubbleMapImage = yield generateBubbleMap(bubbleData.holders);
-            // Format response
-            const message = formatResponse({
-                address,
-                bubbleData,
-                marketData,
-                scoreData
-            });
-            // Send results
-            yield bot.deleteMessage(chatId, processingMsg.message_id);
-            yield bot.sendPhoto(chatId, bubbleMapImage);
-            yield bot.sendMessage(chatId, message, {
+            bot.sendMessage(chatId, `🔍 Looking up information for contract: ${address} on ${chain.toUpperCase()}`);
+            const response = yield axios.get(`https://api-legacy.bubblemaps.io/map-data?token=${address}&chain=${chain}`);
+            const legacyResponse = yield axios.get(`https://api-legacy.bubblemaps.io/map-metadata?chain=${chain}&token=${address}`);
+            const tokenData = response.data;
+            const tokenMetadata = legacyResponse.data;
+            // Get proper block explorer URL based on chain
+            const explorerUrl = getExplorerUrl(chain, address);
+            const message = `
+*Token Information*
+📝 *Name:* ${tokenData.full_name}
+🔤 *Symbol:* ${tokenData.symbol}
+⛓️ *Chain:* ${chain.toUpperCase()}
+🔗 *Contract:* [${address}](${explorerUrl})
+🔢 *Decentralisation Score:* ${tokenMetadata.decentralisation_score}
+👥 *Holders:* ${tokenMetadata.holders_count || 'Unknown'}
+💰 *Total Supply:* ${tokenData.total_supply ? formatSupply(tokenData.total_supply, tokenData.decimals) : 'Unknown'}
+
+[View on Bubblemaps](https://app.bubblemaps.io/${chain}/token/${address})
+`;
+            // Send text information
+            bot.sendMessage(chatId, message, {
                 parse_mode: 'Markdown',
                 disable_web_page_preview: true
             });
+            // Generate and send screenshot
+            const screenshot = yield generateBubbleMapScreenshot(chain, address);
+            if (screenshot) {
+                bot.sendPhoto(chatId, screenshot);
+            }
         }
         catch (error) {
-            console.error('Processing error:', error);
-            bot.sendMessage(chatId, '❌ Error analyzing token. Please try again later.');
+            console.error('Error looking up token:', error);
+            bot.sendMessage(chatId, "❌ Sorry, I couldn't retrieve information for that token. Please try again later.");
         }
     });
 }
-// Data fetching functions
-function getBubbleMapData(address) {
+/**
+ * Send just the token screenshot
+ */
+function sendTokenScreenshot(chatId, chain, address) {
     return __awaiter(this, void 0, void 0, function* () {
-        const cacheKey = `bubble-${address}`;
-        if (cache.has(cacheKey))
-            return cache.get(cacheKey);
-        const response = yield axios_1.default.get(`https://api.bubblemaps.io/v1/map-data/${CHAIN}/${address}`);
-        cache.set(cacheKey, response.data); // Cache for 5 minutes
-        return response.data;
+        try {
+            bot.sendMessage(chatId, `📸 Generating bubblemap for: ${address} on ${chain.toUpperCase()}...`);
+            const screenshot = yield generateBubbleMapScreenshot(chain, address);
+            if (screenshot) {
+                yield bot.sendPhoto(chatId, screenshot, {
+                    caption: `Bubblemap for ${address} on ${chain.toUpperCase()}`
+                });
+            }
+            else {
+                bot.sendMessage(chatId, "❌ Failed to generate screenshot. Please try again later.");
+            }
+        }
+        catch (error) {
+            console.error('Error generating screenshot:', error);
+            bot.sendMessage(chatId, "❌ Sorry, I couldn't generate a screenshot for that token.");
+        }
     });
 }
-function getMarketData(address) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const cacheKey = `market-${address}`;
-        if (cache.has(cacheKey))
-            return cache.get(cacheKey);
-        const response = yield axios_1.default.get(`https://api.coingecko.com/api/v3/coins/${CHAIN}/contract/${address}`, { headers: { 'x-cg-api-key': COINGECKO_API_KEY } });
-        const data = {
-            price: response.data.market_data.current_price.usd,
-            marketCap: response.data.market_data.market_cap.usd,
-            volume: response.data.market_data.total_volume.usd
-        };
-        cache.set(cacheKey, data); // Cache for 3 minutes
-        return data;
-    });
+/**
+ * Get appropriate blockchain explorer URL based on chain
+ */
+function getExplorerUrl(chain, address) {
+    const explorers = {
+        'eth': `https://etherscan.io/address/${address}`,
+        'bsc': `https://bscscan.com/address/${address}`,
+        'polygon': `https://polygonscan.com/address/${address}`,
+        'arbitrum': `https://arbiscan.io/address/${address}`,
+        'optimism': `https://optimistic.etherscan.io/address/${address}`,
+        'avalanche': `https://snowtrace.io/address/${address}`
+    };
+    return explorers[chain] || `https://etherscan.io/address/${address}`;
 }
-function getDecentralizationScore(address) {
+function generateBubbleMapScreenshot(chain, tokenAddress) {
     return __awaiter(this, void 0, void 0, function* () {
-        const response = yield axios_1.default.get(`https://api.bubblemaps.io/v1/score/${CHAIN}/${address}`);
-        return response.data.score;
-    });
-}
-// Visualization generation
-function generateBubbleMap(holders) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const canvas = (0, canvas_1.createCanvas)(CANVAS_SIZE.width, CANVAS_SIZE.height);
-        const ctx = canvas.getContext('2d');
-        // Draw background
-        ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        // Calculate positions
-        const positions = calculateBubblePositions(holders);
-        // Draw bubbles
-        positions.forEach(({ x, y, radius, color }) => {
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
+        const browser = yield puppeteer_1.default.launch({
+            executablePath: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-shields']
         });
-        return canvas.toBuffer('image/png');
+        const page = yield browser.newPage();
+        yield page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 2 });
+        try {
+            yield page.goto(`https://app.bubblemaps.io/${chain}/token/${tokenAddress}?small_text&hide_context`, {
+                waitUntil: 'networkidle2',
+                timeout: 60000
+            });
+            // Wait for rendering
+            yield new Promise(resolve => setTimeout(resolve, 8000));
+            return yield page.screenshot({
+                type: 'jpeg',
+                quality: 90,
+                fullPage: false
+            });
+        }
+        finally {
+            yield browser.close();
+        }
     });
 }
-function calculateBubblePositions(holders) {
-    // Simple layout algorithm - consider using d3-force for complex layouts
-    const MAX_BUBBLE_SIZE = 80;
-    const MIN_BUBBLE_SIZE = 15;
-    return holders.map(holder => ({
-        x: Math.random() * (CANVAS_SIZE.width - 200) + 100,
-        y: Math.random() * (CANVAS_SIZE.height - 200) + 100,
-        radius: Math.max(MIN_BUBBLE_SIZE, (holder.percentage * MAX_BUBBLE_SIZE) / 100),
-        color: `hsl(${Math.random() * 360}, 70%, 50%)`
-    }));
+/**
+ * Format token supply with proper decimal places
+ */
+function formatSupply(supply, decimals) {
+    const num = parseInt(supply) / Math.pow(10, decimals);
+    return num.toLocaleString();
 }
-// Response formatting
-function formatResponse({ address, bubbleData, marketData, scoreData }) {
-    var _a, _b;
-    return `
-*Token Analysis Report* 🔍
-
-📛 *Name:* ${bubbleData.name || 'N/A'}
-🔣 *Symbol:* ${bubbleData.symbol || 'N/A'}
-📌 *Contract:* [${shortenAddress(address)}](https://bscscan.com/address/${address})
-
-💰 *Market Data*
-  ▸ Price: $${((_a = marketData.price) === null || _a === void 0 ? void 0 : _a.toFixed(4)) || 'N/A'}
-  ▸ Market Cap: $${formatNumber(marketData.marketCap)}
-  ▸ 24h Volume: $${formatNumber(marketData.volume)}
-
-📊 *Distribution Analysis*
-  ▸ Holders: ${bubbleData.holders.length}
-  ▸ Top Holder: ${(_b = bubbleData.holders[0]) === null || _b === void 0 ? void 0 : _b.percentage.toFixed(2)}%
-  ▸ Decentralization Score: ${scoreData.toFixed(1)}/10
-
-ℹ️ *Insights*
-${generateInsights(bubbleData, scoreData)}
-`;
-}
-// Helper functions
-function shortenAddress(address) {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-function formatNumber(num) {
-    return num ? new Intl.NumberFormat().format(num) : 'N/A';
-}
-function generateInsights(bubbleData, score) {
-    const insights = [];
-    if (score < 5)
-        insights.push('⚠️ Highly concentrated ownership');
-    if (bubbleData.holders.length < 100)
-        insights.push('⚠️ Low holder diversity');
-    return insights.join('\n') || '✅ Healthy distribution pattern detected';
-}
-console.log('Bot started successfully');
+console.log('Bot is running...');
 //# sourceMappingURL=index.js.map
