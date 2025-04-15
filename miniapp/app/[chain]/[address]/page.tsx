@@ -1,12 +1,13 @@
 
 interface MiniAppProps {
-  params: {
+  params: Promise<{
     chain: string;
     address: string;
-  };
+  }>;
 }
 
-export default function MiniApp({ params }: MiniAppProps) {
+export default async function MiniApp(props: MiniAppProps) {
+  const params = await props.params;
   const { chain, address } = params;
   const url = `https://app.bubblemaps.io/${chain}/token/${address}`;
 
