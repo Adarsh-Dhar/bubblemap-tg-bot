@@ -18,11 +18,19 @@ dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const puppeteer_1 = __importDefault(require("puppeteer"));
+const fs_1 = __importDefault(require("fs"));
 // Get token from environment variables
 const token = process.env.TG_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
-// Valid chains
-const VALID_CHAINS = ['eth', 'bsc', 'polygon', 'arbitrum', 'optimism', 'avalanche'];
+// Valid chains and their corresponding token lists
+const VALID_CHAINS = ['eth', 'bsc', 'cro', 'sonic'];
+// Load token data from JSON files
+const tokenData = {
+    eth: JSON.parse(fs_1.default.readFileSync(path_1.default.resolve(__dirname, '../address/eth.json'), 'utf8')),
+    bsc: JSON.parse(fs_1.default.readFileSync(path_1.default.resolve(__dirname, '../address/bsc.json'), 'utf8')),
+    cro: JSON.parse(fs_1.default.readFileSync(path_1.default.resolve(__dirname, '../address/cro.json'), 'utf8')),
+    sonic: JSON.parse(fs_1.default.readFileSync(path_1.default.resolve(__dirname, '../address/sonic.json'), 'utf8'))
+};
 // Start/Help Command
 bot.onText(/\/start|\/help/, (msg) => {
     const chatId = msg.chat.id;
@@ -39,20 +47,25 @@ I can help you analyze cryptocurrency tokens with:
 - /miniapp - Open interactive web application
 - /help - Show this help message
 
-**Supported chains:** eth, bsc, polygon, arbitrum, optimism, avalanche`;
+**Supported chains:** ${VALID_CHAINS.join(', ')}`;
     bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
 });
 // Lookup Command (comprehensive info + screenshot)
-bot.onText(/\/lookup (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
+bot.onText(/\/lookup(.*)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
     const chatId = msg.chat.id;
-    const params = match[1].trim().split(' ');
-    if (params.length < 2) {
-        return bot.sendMessage(chatId, "❌ Please specify both chain and contract address.\nExample: `/lookup bsc 0x...`");
+    const params = match[1] ? match[1].trim().split(' ') : [];
+    if (params.length < 2 || !params[0]) {
+        // If no parameters, prompt for chain selection
+        return promptForChainSelection(chatId, 'lookup');
     }
     const chain = params[0].toLowerCase();
     const contractAddress = params[1];
     if (!VALID_CHAINS.includes(chain)) {
         return bot.sendMessage(chatId, `❌ Invalid chain. Supported chains: ${VALID_CHAINS.join(', ')}`);
+    }
+    if (!contractAddress) {
+        // If chain is provided but no address, prompt for token selection
+        return promptForTokenSelection(chatId, chain, 'lookup');
     }
     if (isValidAddress(contractAddress)) {
         yield lookupToken(chatId, chain, contractAddress);
@@ -62,16 +75,21 @@ bot.onText(/\/lookup (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0, fu
     }
 }));
 // Screenshot Command
-bot.onText(/\/screenshot (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
+bot.onText(/\/screenshot(.*)/, (msg, match) => __awaiter(void 0, void 0, void 0, function* () {
     const chatId = msg.chat.id;
-    const params = match[1].trim().split(' ');
-    if (params.length < 2) {
-        return bot.sendMessage(chatId, "❌ Please specify both chain and contract address.\nExample: `/screenshot bsc 0x...`");
+    const params = match[1] ? match[1].trim().split(' ') : [];
+    if (params.length < 2 || !params[0]) {
+        // If no parameters, prompt for chain selection
+        return promptForChainSelection(chatId, 'screenshot');
     }
     const chain = params[0].toLowerCase();
     const contractAddress = params[1];
     if (!VALID_CHAINS.includes(chain)) {
         return bot.sendMessage(chatId, `❌ Invalid chain. Supported chains: ${VALID_CHAINS.join(', ')}`);
+    }
+    if (!contractAddress) {
+        // If chain is provided but no address, prompt for token selection
+        return promptForTokenSelection(chatId, chain, 'screenshot');
     }
     if (isValidAddress(contractAddress)) {
         yield sendTokenScreenshot(chatId, chain, contractAddress);
@@ -84,40 +102,78 @@ bot.onText(/\/screenshot (.+)/, (msg, match) => __awaiter(void 0, void 0, void 0
 bot.onText(/\/miniapp(.*)/, (msg, match) => {
     const chatId = msg.chat.id;
     const params = match[1] ? match[1].trim().split(' ') : [];
-    if (params.length >= 2) {
-        const chain = params[0].toLowerCase();
-        const address = params[1];
-        if (VALID_CHAINS.includes(chain) && isValidAddress(address)) {
-            // Launch with specific chain and address
-            bot.sendMessage(chatId, `📊 Open Interactive Bubblemap for ${chain.toUpperCase()} token ${address}`, {
-                reply_markup: {
-                    inline_keyboard: [[
-                            {
-                                text: "Launch Bubblemap App",
-                                web_app: { url: `https://bubblemap-tg-bot-1j79.vercel.app/${chain}/${address}` },
-                            }
-                        ]]
-                }
-            });
-        }
-        else {
-            promptForChainAndAddress(chatId, "miniapp");
-        }
+    if (params.length < 2 || !params[0]) {
+        // If no parameters, prompt for chain selection
+        return promptForChainSelection(chatId, 'miniapp');
+    }
+    const chain = params[0].toLowerCase();
+    const address = params[1];
+    if (!VALID_CHAINS.includes(chain)) {
+        return bot.sendMessage(chatId, `❌ Invalid chain. Supported chains: ${VALID_CHAINS.join(', ')}`);
+    }
+    if (!address) {
+        // If chain is provided but no address, prompt for token selection
+        return promptForTokenSelection(chatId, chain, 'miniapp');
+    }
+    if (isValidAddress(address)) {
+        // Launch with specific chain and address
+        bot.sendMessage(chatId, `📊 Open Interactive Bubblemap for ${chain.toUpperCase()} token ${address}`, {
+            reply_markup: {
+                inline_keyboard: [[
+                        {
+                            text: "Launch Bubblemap App",
+                            web_app: { url: `https://bubblemap-tg-bot-1j79.vercel.app/${chain}/${address}` },
+                        }
+                    ]]
+            }
+        });
     }
     else {
-        promptForChainAndAddress(chatId, "miniapp");
+        bot.sendMessage(chatId, "❌ Invalid contract address format");
     }
 });
 /**
- * Prompt user to provide chain and address for miniapp
+ * Prompt user to select a chain from available options
  */
-function promptForChainAndAddress(chatId, command) {
-    const message = `Please provide a blockchain and contract address:
-  
-Example: /${command} eth 0x...
-
-Supported chains: ${VALID_CHAINS.join(', ')}`;
-    bot.sendMessage(chatId, message);
+function promptForChainSelection(chatId, command) {
+    const keyboard = VALID_CHAINS.map(chain => [{
+            text: chain.toUpperCase(),
+            callback_data: `select_chain_${command}_${chain}`
+        }]);
+    bot.sendMessage(chatId, `Please select a blockchain:`, {
+        reply_markup: {
+            inline_keyboard: keyboard
+        }
+    });
+}
+/**
+ * Prompt user to select a token from the specified chain
+ */
+function promptForTokenSelection(chatId, chain, command) {
+    const tokens = tokenData[chain];
+    if (!tokens) {
+        return bot.sendMessage(chatId, `❌ No tokens available for ${chain.toUpperCase()}`);
+    }
+    // Get token names and create buttons (max 8 per row)
+    const tokenNames = Object.keys(tokens);
+    const keyboard = [];
+    const buttonsPerRow = 1;
+    for (let i = 0; i < Math.min(tokenNames.length, 10); i++) {
+        const tokenName = tokenNames[i];
+        // Use an index instead of the full address in callback data
+        if (i % buttonsPerRow === 0) {
+            keyboard.push([]);
+        }
+        keyboard[Math.floor(i / buttonsPerRow)].push({
+            text: tokenName,
+            callback_data: `select_token_${command}_${chain}_${i}` // Using index instead of full address
+        });
+    }
+    bot.sendMessage(chatId, `Select a token on ${chain.toUpperCase()}:`, {
+        reply_markup: {
+            inline_keyboard: keyboard
+        }
+    });
 }
 // Direct Message Handler for contract addresses
 bot.on('message', (msg) => __awaiter(void 0, void 0, void 0, function* () {
@@ -141,37 +197,71 @@ bot.on('message', (msg) => __awaiter(void 0, void 0, void 0, function* () {
         const address = parts[0];
         yield promptForChain(chatId, address);
     }
+    // If just a chain name, prompt for token selection
+    else if (parts.length === 1 && VALID_CHAINS.includes(parts[0].toLowerCase())) {
+        const chain = parts[0].toLowerCase();
+        promptForTokenSelection(chatId, chain, 'lookup');
+    }
 }));
-/**
- * Prompt user to select a chain for the provided address
- */
-function promptForChain(chatId, address) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const keyboard = VALID_CHAINS.map(chain => [{
-                text: chain.toUpperCase(),
-                callback_data: `chain_${chain}_${address}`
-            }]);
-        bot.sendMessage(chatId, `Please select a blockchain for address ${address}:`, {
-            reply_markup: {
-                inline_keyboard: keyboard
-            }
-        });
-    });
-}
-// Handle chain selection callback
+// Handle callback queries
 bot.on('callback_query', (callbackQuery) => __awaiter(void 0, void 0, void 0, function* () {
     const data = callbackQuery.data;
     const chatId = callbackQuery.message.chat.id;
-    if (data.startsWith('chain_')) {
+    // Handle chain selection
+    if (data.startsWith('select_chain_')) {
+        const parts = data.split('_');
+        const command = parts[2];
+        const chain = parts[3];
+        bot.answerCallbackQuery(callbackQuery.id);
+        promptForTokenSelection(chatId, chain, command);
+    }
+    // Handle token selection
+    else if (data.startsWith('select_token_')) {
+        const parts = data.split('_');
+        const command = parts[2];
+        const chain = parts[3];
+        const tokenIndex = parseInt(parts[4]); // Get index instead of address
+        // Get the actual address using the index
+        const tokenNames = Object.keys(tokenData[chain]);
+        const tokenName = tokenNames[tokenIndex];
+        const address = tokenData[chain][tokenName];
+        bot.answerCallbackQuery(callbackQuery.id);
+        switch (command) {
+            case 'lookup':
+                yield lookupToken(chatId, chain, address);
+                break;
+            case 'screenshot':
+                yield sendTokenScreenshot(chatId, chain, address);
+                break;
+            case 'miniapp':
+                bot.sendMessage(chatId, `📊 Open Interactive Bubblemap for ${chain.toUpperCase()} token ${address}`, {
+                    reply_markup: {
+                        inline_keyboard: [[
+                                {
+                                    text: "Launch Bubblemap App",
+                                    web_app: { url: `https://bubblemap-tg-bot-1j79.vercel.app/${chain}/${address}` },
+                                }
+                            ]]
+                    }
+                });
+                break;
+        }
+    }
+    // Handle direct chain selection for an address
+    else if (data.startsWith('chain_')) {
         const parts = data.split('_');
         const chain = parts[1];
-        const address = parts[2];
+        // For this case, we need a different approach since the address is too long
+        // Store addresses temporarily in memory with a unique ID
+        const addressId = parts[2];
+        const address = tempAddressStorage[addressId];
         if (VALID_CHAINS.includes(chain) && isValidAddress(address)) {
             bot.answerCallbackQuery(callbackQuery.id);
             yield lookupToken(chatId, chain, address);
         }
     }
 }));
+const tempAddressStorage = {};
 /**
  * Check if text appears to be a valid contract address
  */
@@ -250,10 +340,8 @@ function getExplorerUrl(chain, address) {
     const explorers = {
         'eth': `https://etherscan.io/address/${address}`,
         'bsc': `https://bscscan.com/address/${address}`,
-        'polygon': `https://polygonscan.com/address/${address}`,
-        'arbitrum': `https://arbiscan.io/address/${address}`,
-        'optimism': `https://optimistic.etherscan.io/address/${address}`,
-        'avalanche': `https://snowtrace.io/address/${address}`
+        'cro': `https://cronoscan.com/address/${address}`,
+        'sonic': `https://sonicexplorer.io/address/${address}`
     };
     return explorers[chain] || `https://etherscan.io/address/${address}`;
 }
@@ -290,6 +378,26 @@ function generateBubbleMapScreenshot(chain, tokenAddress) {
 function formatSupply(supply, decimals) {
     const num = parseInt(supply) / Math.pow(10, decimals);
     return num.toLocaleString();
+}
+function promptForChain(chatId, address) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Generate a short unique ID for this address
+        const addressId = Date.now().toString(36);
+        tempAddressStorage[addressId] = address;
+        const keyboard = VALID_CHAINS.map(chain => [{
+                text: chain.toUpperCase(),
+                callback_data: `chain_${chain}_${addressId}`
+            }]);
+        bot.sendMessage(chatId, `Please select a blockchain for address ${address}:`, {
+            reply_markup: {
+                inline_keyboard: keyboard
+            }
+        });
+        // Clean up the temp storage after some time
+        setTimeout(() => {
+            delete tempAddressStorage[addressId];
+        }, 30 * 60 * 1000); // 30 minutes
+    });
 }
 console.log('Bot is running...');
 //# sourceMappingURL=index.js.map
