@@ -44,7 +44,7 @@ I can help you analyze cryptocurrency tokens with:
 **Commands:**
 - /lookup <chain> <address> - Get detailed token analysis
 - /screenshot <chain> <address> - Get bubblemap visualization
-- /miniapp - Open interactive web application
+- /bubble - Open interactive web application
 - /help - Show this help message
 
 **Supported chains:** ${VALID_CHAINS.join(', ')}`;
@@ -99,12 +99,12 @@ bot.onText(/\/screenshot(.*)/, (msg, match) => __awaiter(void 0, void 0, void 0,
     }
 }));
 // Mini App Command
-bot.onText(/\/miniapp(.*)/, (msg, match) => {
+bot.onText(/\/bubble(.*)/, (msg, match) => {
     const chatId = msg.chat.id;
     const params = match[1] ? match[1].trim().split(' ') : [];
     if (params.length < 2 || !params[0]) {
         // If no parameters, prompt for chain selection
-        return promptForChainSelection(chatId, 'miniapp');
+        return promptForChainSelection(chatId, 'bubble');
     }
     const chain = params[0].toLowerCase();
     const address = params[1];
@@ -113,7 +113,7 @@ bot.onText(/\/miniapp(.*)/, (msg, match) => {
     }
     if (!address) {
         // If chain is provided but no address, prompt for token selection
-        return promptForTokenSelection(chatId, chain, 'miniapp');
+        return promptForTokenSelection(chatId, chain, 'bubble');
     }
     if (isValidAddress(address)) {
         // Launch with specific chain and address
@@ -233,7 +233,7 @@ bot.on('callback_query', (callbackQuery) => __awaiter(void 0, void 0, void 0, fu
             case 'screenshot':
                 yield sendTokenScreenshot(chatId, chain, address);
                 break;
-            case 'miniapp':
+            case 'bubble':
                 bot.sendMessage(chatId, `📊 Open Interactive Bubblemap for ${chain.toUpperCase()} token ${address}`, {
                     reply_markup: {
                         inline_keyboard: [[
